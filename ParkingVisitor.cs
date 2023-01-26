@@ -1,79 +1,96 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Net.WebSockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
+using System.Timers;
 
-public interface ICar
+public interface IObserver
 {
     void Update(ISubject subject);
-    string Rejestracja { get; set; }
-    DateTime godzinaPrzyjazdu { get; set; }
 }
 
 public interface ISubject
 {
-    void Input(ICar observer);
-    void Output(ICar observer);
-    ICar ReturnCar(string rejestracja);
+    void Attach(IObserver observer);
+    void Detach(IObserver observer);
+    void Notify();
 }
 public class Subject : ISubject
 {
     public int State { get; set; } = -0;
-    private List<ICar> _observers = new List<ICar>();
-    public void Input(ICar observer)
+    private List<IObserver> _observers = new List<IObserver>();
+    public List<Car>? Cars = new List<Car>();
+    public double LeftToPay { get; set; }
+    public void Attach(IObserver observer)
     {
-        if (_observers.Count > 100)
+        Console.WriteLine("Dodano nowego observera");
+        _observers.Add(observer);
+    }
+    public void Detach(IObserver observer)
+    {
+        Console.WriteLine("Usunieto observera");
+        _observers.Remove(observer);
+    }
+    public void Notify()
+    {
+        foreach (var observer in _observers)
         {
-            Console.WriteLine("Wszystkie miejsca zajęte");
-            return;
+            observer.Update(this);
         }
+    }
+    public void CarArrive(Car car)
+    {
         this.State = 1;
-        observer.Update(this);
-        this._observers.Add(observer);
-        Console.WriteLine("Dodano samochód do parkingu");
-        Console.WriteLine("Pozostało ilość miejsc:  " + (100 - _observers.Count));
-    }
-
-    public void Output(ICar observer)
-    {
-        if (!_observers.Any(x => x.Equals(observer)))
+        if (Cars.Count == 100)
         {
-            Console.WriteLine("Błąd, brak samochodu o takim numerze");
+            Console.WriteLine("Brak miejsc na parkingu");
             return;
         }
-        this.State = 2;
-        this._observers.Remove(observer);
-        Console.WriteLine("Pozostało ilość miejsc " + +(100 - _observers.Count));
-        observer.Update(this);
-    }
-
-    public ICar? ReturnCar(string rejestracja)
-    {
-        var car = _observers.FirstOrDefault(x => x.Rejestracja == rejestracja);
-        if (car != null)
+        else if (Cars.Any(x => x.Rejestracja == car.Rejestracja))
         {
-            return car;
+            Console.WriteLine("Istnieje już samochód o takim numerze rejestracyjnym");
+            return;
         }
-        Console.WriteLine("Błąd, brak samochodu o takim numerze");
-        return null;
+        Cars.Add(car);
+        this.Notify();
+    }
+    public void CarLeft(Car car)
+    {
+        Cars.Remove(car);
+        this.State = 2;
+        var godzinaOdjazdu = DateTime.Now;
+        var time = godzinaOdjazdu.Subtract(car.godzinaPrzyjazdu);
+        LeftToPay = time.TotalSeconds * 0.1 * 0.01;
+        this.Notify();
     }
 }
-class Car : ICar
+class Ekran : IObserver
 {
-    public string Rejestracja { get; set; }
-    public DateTime godzinaPrzyjazdu { get; set; }
-
     public void Update(ISubject subject)
     {
-        if ((subject as Subject).State == 1)
+        Console.WriteLine("Pozostało ilość miejsc " + (100 - (subject as Subject).Cars.Count));
+    }
+}
+class Drukarka : IObserver
+{
+    public void Update(ISubject subject)
+    {
+        if ((subject as Subject).State == 2)
         {
-            godzinaPrzyjazdu = DateTime.Now;
+            Console.WriteLine("Do drukarki wysłano paragon o ilości " + (subject as Subject).LeftToPay + " PLN");
         }
-        else if ((subject as Subject).State == 2)
-        {
-            var godzinaOdjazdu = DateTime.Now;
-            var time = godzinaOdjazdu.Subtract(godzinaPrzyjazdu);
-            Console.WriteLine("Do drukarki wysłano paragon o ilości " + (time.TotalSeconds * 0.1 * 0.01) + " PLN");
-        }
+    }
+
+}
+public class Car
+{
+    public string Rejestracja;
+    public DateTime godzinaPrzyjazdu;
+    public Car(string rejestracja, DateTime godzinaPrzyjazdu)
+    {
+        Rejestracja = rejestracja;
+        this.godzinaPrzyjazdu = godzinaPrzyjazdu;
     }
 }
 
@@ -82,6 +99,10 @@ class Program
     static void Main(string[] args)
     {
         var parking = new Subject();
+        var drukarkaObs = new Drukarka();
+        var ekranObs = new Ekran();
+        parking.Attach(drukarkaObs);
+        parking.Attach(ekranObs);
 
         while (true)
         {
@@ -93,9 +114,8 @@ class Program
                 var rejestracja = Console.ReadLine();
                 if (rejestracja != null)
                 {
-                    var car = new Car();
-                    car.Rejestracja = rejestracja;
-                    parking.Input(car);
+                    var car = new Car(rejestracja, DateTime.Now);
+                    parking.CarArrive(car);
                 }
                 else
                 {
@@ -108,10 +128,14 @@ class Program
                 var rejestracja = Console.ReadLine();
                 if (rejestracja != null)
                 {
-                    var car = parking.ReturnCar(rejestracja);
+                    var car = parking.Cars.FirstOrDefault(x => x.Rejestracja == rejestracja);
                     if (car != null)
                     {
-                        parking.Output(car);
+                        parking.CarLeft(car);
+                    }
+                    else
+                    {
+                        Console.WriteLine("Błąd, brak samochodu o takim numerze");
                     }
                 }
                 else
